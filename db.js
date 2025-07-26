@@ -43,4 +43,17 @@ db.serialize(() => {
   `);
 });
 
+// 위치 정보
+db.serialize(() => {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      lat REAL NOT NULL,
+      lng REAL NOT NULL,
+      timestamp TEXT NOT NULL
+    )
+  `);
+});
+
 module.exports = db;
