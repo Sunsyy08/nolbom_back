@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS ward_status (
   ward_id INTEGER PRIMARY KEY,           -- wards.id와 1:1 매핑
   is_outside INTEGER DEFAULT 0,          -- 외출 상태 (0: 집 안, 1: 외출 중)
   last_alert_time INTEGER DEFAULT 0,     -- 마지막 알림 시각 (timestamp ms)
-  alert_interval INTEGER DEFAULT 600,    -- 외출 중 알림 반복 시간 (초)
+  alert_interval INTEGER DEFAULT 10,    -- 외출 중 알림 반복 시간 (초)
   FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
 );
 `)
