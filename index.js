@@ -110,6 +110,10 @@ app.get('/user/me', authenticateToken, (req, res) => {
 // 📡 GPS 위치 기능 연결
 require('./location')(app, io);
 
+// 라우터 연결
+const wardLocationRoutes = require('./routes/wardLocation');
+app.use('/', wardLocationRoutes);
+
 
 // 서버 실행
 const PORT = 3000;

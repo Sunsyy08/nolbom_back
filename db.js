@@ -30,30 +30,44 @@ db.serialize(() => {
   `);
 
   // wards 테이블 (노약자 전용 정보)
-  db.run(`
-    CREATE TABLE IF NOT EXISTS wards (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      gender TEXT,
-      medical_info TEXT,
-      home_address TEXT,
-      photo_url TEXT,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )
-  `);
+db.run(`
+CREATE TABLE IF NOT EXISTS wards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  gender TEXT,
+  medical_info TEXT,
+  home_address TEXT,
+  photo_url TEXT,
+  safe_lat REAL,
+  safe_lng REAL,
+  safe_radius INTEGER DEFAULT 100,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+`);
+db.run(`
+CREATE TABLE IF NOT EXISTS ward_status (
+  ward_id INTEGER PRIMARY KEY,           -- wards.id와 1:1 매핑
+  is_outside INTEGER DEFAULT 0,          -- 외출 상태 (0: 집 안, 1: 외출 중)
+  last_alert_time INTEGER DEFAULT 0,     -- 마지막 알림 시각 (timestamp ms)
+  alert_interval INTEGER DEFAULT 600,    -- 외출 중 알림 반복 시간 (초)
+  FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
+);
+`)
 });
 
 // 위치 정보
 db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS locations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      lat REAL NOT NULL,
-      lng REAL NOT NULL,
-      timestamp TEXT NOT NULL
-    )
-  `);
+// 위치 기록 테이블 (GPS 위치 이력 저장)
+db.run(`
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ward_id INTEGER NOT NULL,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
+);
+`);
 });
 
 module.exports = db;
