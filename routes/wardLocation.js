@@ -94,6 +94,7 @@ if (!ward) {
       db.run(`INSERT INTO locations (ward_id, lat, lng) VALUES (?, ?, ?)`,
         [ward.ward_id, lat, lng]);
 
+
       // 상태 판단 및 알림
       if (distance > safeRadius && !isOutside) {
         notifyGuardian(`${ward.name}님이 외출했습니다 (${new Date(now).toLocaleTimeString()})`);
