@@ -4,14 +4,18 @@ const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
+const wardLocationRouter = require('./routes/wardLocation');
+const auth = require('./middlewares/auth');    
 const authenticateToken = require('./middlewares/auth');
+
 
 const JWT_SECRET = 'my_secret_key';
 
 const app = express();
-const http = require('http').createServer(app);           // http 서버
-const { Server } = require('socket.io');                  // socket.io
-const io = new Server(http, { cors: { origin: '*' } });   // WebSocket 허용
+const http = require('http');  
+const server = http.createServer(app);           // http 서버
+const { Server } = require('socket.io');               // socket.io
+const io = new Server(server, { cors: { origin: '*' } });   // WebSocket 허용
 
 
 app.use(bodyParser.json());
@@ -138,38 +142,11 @@ app.get('/user/me', authenticateToken, (req, res) => {
 require('./location')(app, io);
 
 // 라우터 연결
-const wardLocationRoutes = require('./routes/wardLocation');
-app.use('/', wardLocationRoutes);
+// /ward/* 요청은 routes/wardLocation.js 로 전달
+app.use('/ward', auth, wardLocationRouter);
 
-// ✅ 외출 중인 노약자에게 자동으로 "외출 중입니다" 알림 반복
-setInterval(() => {
-  const now = Date.now();
-
-  const sql = `
-    SELECT s.ward_id, s.last_alert_time, s.alert_interval, u.name
-    FROM ward_status s
-    JOIN wards w ON w.id = s.ward_id
-    JOIN users u ON w.user_id = u.id
-    WHERE s.is_outside = 1
-  `;
-
-  db.all(sql, [], (err, rows) => {
-    if (err) return console.error('[오류] 알림 조회 실패:', err);
-
-    rows.forEach(row => {
-      const intervalMs = (row.alert_interval || 30) * 1000;
-      if (now - row.last_alert_time >= intervalMs) {
-        console.log(`[자동알림] ${row.name}님이 외출 중입니다 (${new Date(now).toLocaleTimeString()})`);
-        db.run(`UPDATE ward_status SET last_alert_time = ? WHERE ward_id = ?`, [now, row.ward_id]);
-      }
-    });
-  });
-}, 10000); // ⏱️ 10초마다 검사
-
-
-
-// 서버 실행
-const PORT = 3000;
-http.listen(PORT, () => {
+// 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
