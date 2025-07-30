@@ -9,10 +9,10 @@ function getDistance(lat1, lon1, lat2, lon2) {
   const toRad = deg => deg * Math.PI / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat/2)**2 +
-            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-            Math.sin(dLon/2)**2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
 
@@ -54,6 +54,7 @@ router.post('/location', auth, (req, res) => {
   const { lat, lng } = req.body;
   const userId = req.user.user_id;
   const now = Date.now();
+
   if (lat == null || lng == null) {
     return res.status(400).json({ error: '위도와 경도가 필요합니다' });
   }
@@ -91,11 +92,30 @@ router.post('/location', auth, (req, res) => {
         return;
       }
 
+        // 위치 이동 감지 및 last_moved_at 갱신
+  const prevLat = status.last_lat;
+  const prevLng = status.last_lng;
       // 3) 거리 계산 + 위치 저장
       const distance = getDistance(lat, lng, ward.safe_lat, ward.safe_lng);
       const safeRadius = ward.safe_radius != null ? ward.safe_radius : 100;
       const isOutside = status.is_outside === 1;
       db.run(`INSERT INTO locations (ward_id, lat, lng) VALUES (?, ?, ?)`, [ward.ward_id, lat, lng]);
+
+      // 이동한 거리 계산 (이전 좌표가 있을 때만)
+      let moved = false;
+      if (prevLat != null && prevLng != null) {
+        const moveDist = getDistance(lat, lng, prevLat, prevLng);
+        moved = moveDist > 10;  // 10m 이상이면 이동으로 판단
+      }
+
+      // 위치 및 이동시간 업데이트
+      const updateStatusSql = `
+  UPDATE ward_status
+  SET last_lat = ?, last_lng = ?,
+      last_moved_at = CASE WHEN ? THEN ? ELSE last_moved_at END
+  WHERE ward_id = ?
+`;
+      db.run(updateStatusSql, [lat, lng, moved, now, ward.ward_id]);
 
       // 4) 상태 전환 및 알림
       if (distance > safeRadius && !isOutside) {
@@ -103,7 +123,7 @@ router.post('/location', auth, (req, res) => {
         notifyGuardian(`${ward.name}님이 외출했습니다 (${new Date(now).toLocaleTimeString()})`);
         db.run(`UPDATE ward_status SET is_outside=1, last_alert_time=? WHERE ward_id=?`, [now, ward.ward_id]);
       }
-      else if (distance > safeRadius && isOutside && now - status.last_alert_time >= (status.alert_interval||10)*1000) {
+      else if (distance > safeRadius && isOutside && now - status.last_alert_time >= (status.alert_interval || 10) * 1000) {
         // 외출 중 반복 (별도 스케줄러 없이 호출 시)
         notifyGuardian(`${ward.name}님이 외출 중입니다 (${new Date(now).toLocaleTimeString()})`);
         db.run(`UPDATE ward_status SET last_alert_time=? WHERE ward_id=?`, [now, ward.ward_id]);

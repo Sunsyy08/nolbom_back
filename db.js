@@ -53,6 +53,23 @@ CREATE TABLE IF NOT EXISTS ward_status (
   FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
 );
 `)
+// db.run(`ALTER TABLE ward_status ADD COLUMN last_lat REAL`);
+// db.run(`ALTER TABLE ward_status ADD COLUMN last_lng REAL`);
+// db.run(`ALTER TABLE ward_status ADD COLUMN last_moved_at INTEGER`);
+
+db.run(`
+CREATE TABLE IF NOT EXISTS missing_wards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ward_id INTEGER,
+  detected_at DATETIME,
+  last_lat REAL,
+  last_lng REAL,
+  status TEXT DEFAULT 'active',  -- active, found
+  notes TEXT,
+  updated_at DATETIME,
+  FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
+)
+`);
 });
 
 // 위치 정보

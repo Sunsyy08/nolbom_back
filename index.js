@@ -145,6 +145,64 @@ require('./location')(app, io);
 // /ward/* 요청은 routes/wardLocation.js 로 전달
 app.use('/ward', auth, wardLocationRouter);
 
+// 보호자 알림 출력 함수 (현재는 콘솔 출력만)
+function notifyGuardian(message) {
+  console.log(`[알림] ${message}`);
+}
+
+// ✅ 실종 감지 함수 추가
+function checkNoMovement() {
+  const now = Date.now();
+
+  const sql = `
+    SELECT ws.ward_id, ws.last_moved_at, ws.last_lat, ws.last_lng,
+           u.name, w.user_id
+    FROM ward_status ws
+    JOIN wards w ON ws.ward_id = w.id
+    JOIN users u ON w.user_id = u.id
+    WHERE ws.is_outside = 1
+  `;
+
+  db.all(sql, [], (err, rows) => {
+    if (err) return console.error('🚫 감지 실패:', err.message);
+
+    rows.forEach(row => {
+      const timeDiff = now - row.last_moved_at;
+      const overOneHour = timeDiff > 20 * 1000;
+
+      if (!overOneHour) return;
+
+      // 이미 실종자로 등록된 경우 제외
+      const checkMissingSql = `
+        SELECT 1 FROM missing_wards WHERE ward_id = ? AND status = 'active'
+      `;
+      db.get(checkMissingSql, [row.ward_id], (err, found) => {
+        if (err) return console.error('🚫 missing_wards 조회 실패:', err.message);
+        if (found) return; // 이미 등록됨
+
+        // 실종자 등록
+        const insertSql = `
+          INSERT INTO missing_wards (
+            ward_id, detected_at, last_lat, last_lng, status, notes, updated_at
+          ) VALUES (
+            ?, DATETIME('now'), ?, ?, 'active', ?, DATETIME('now')
+          )
+        `;
+        const note = `${row.name}님이 외부에서 1시간 이상 움직이지 않았습니다`;
+        db.run(insertSql, [row.ward_id, row.last_lat, row.last_lng, note], (err) => {
+          if (err) return console.error('🚫 실종 등록 실패:', err.message);
+
+          // 보호자 알림 (콘솔 출력)
+          notifyGuardian(`🚨 [실종 감지] ${note}`);
+        });
+      });
+    });
+  });
+}
+
+// ✅ 주기적으로 실행 (5분마다)
+setInterval(checkNoMovement, 20* 1000);
+
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
