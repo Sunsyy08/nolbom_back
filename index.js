@@ -7,6 +7,7 @@ const db = require('./db');
 const wardLocationRouter = require('./routes/wardLocation');
 const auth = require('./middlewares/auth');    
 const authenticateToken = require('./middlewares/auth');
+const missingWardsRouter = require('./routes/missingWard');
 
 
 const JWT_SECRET = 'my_secret_key';
@@ -22,29 +23,35 @@ app.use(bodyParser.json());
 
 // ✅ 1. 공통 회원가입 API (/signup)
 app.post('/signup', async (req, res) => {
-    const { email, password, name, birthdate, phone, role } = req.body;
-  
-    try {
-      const hashedPassword = await bcrypt.hash(password, 10);
-  
-      db.run(
-        `INSERT INTO users (email, password, name, birthdate, phone, role)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [email, hashedPassword, name, birthdate, phone, role],
-        function (err) {
-          if (err) return res.status(500).json({ error: '회원가입 실패', detail: err.message });
-  
-          res.json({
-            success: true,
-            message: `${role === 'guardian' ? '보호자' : '노약자'} 회원가입 성공`,
-            user_id: this.lastID
-          });
+  const { email, password, name, birthdate, phone, role, height, weight } = req.body;
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    db.run(
+      `INSERT INTO users (
+         email, password, name, birthdate, phone, role, height, weight
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [email, hashedPassword, name, birthdate, phone, role, height, weight],
+      function (err) {
+        if (err) {
+          console.error('회원가입 실패:', err);
+          return res.status(500).json({ error: '회원가입 실패', detail: err.message });
         }
-      );
-    } catch (err) {
-      res.status(500).json({ error: '서버 오류', detail: err.message });
-    }
-  });
+
+        res.json({
+          success: true,
+          message: `${role === 'guardian' ? '보호자' : '노약자'} 회원가입 성공`,
+          user_id: this.lastID
+        });
+      }
+    );
+  } catch (err) {
+    console.error('서버 오류:', err);
+    res.status(500).json({ error: '서버 오류', detail: err.message });
+  }
+});
+
   
 
 // ✅ 2. 보호자 정보 추가 API (/signup/guardian/:user_id)
@@ -81,7 +88,14 @@ app.post('/signup/guardian/:user_id', (req, res) => {
 // 노약자 회원가입
 app.post('/signup/ward/:user_id', (req, res) => {
   const userId = req.params.user_id;
-  const { name, age, home_lat, home_lng } = req.body;
+  const {
+    gender,         // e.g. '남자'
+    medical_info,   // e.g. '고혈압, 당뇨'
+    home_address,   // e.g. '서울시 강남구 ...'
+    photo_url,      // e.g. 'https://...jpg'
+    safe_lat,       // e.g. 37.12345
+    safe_lng        // e.g. 127.54321
+  } = req.body;
 
   // 먼저 공통 회원 확인
   db.get(`SELECT * FROM users WHERE id = ?`, [userId], (err, user) => {
@@ -95,12 +109,22 @@ app.post('/signup/ward/:user_id', (req, res) => {
       if (ward) return res.status(400).json({ error: '이미 등록된 노약자입니다.' });
 
       // 등록 실행
-      db.run(`INSERT INTO wards (user_id, gender, medical_info, home_address, photo_url) VALUES (?, ?, ?, ?, ?)`,
-        [userId, name, age, home_lat, home_lng],
-        function (err) {
-          if (err) return res.status(500).json({ error: '등록 실패' });
+      db.run(
+        `INSERT INTO wards (
+           user_id,
+           gender,
+           medical_info,
+           home_address,
+           photo_url,
+           safe_lat,
+           safe_lng
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [userId, gender, medical_info, home_address, photo_url, safe_lat, safe_lng],
+        function(err) {
+          if (err) return res.status(500).json({ error: '노약자 등록 실패', detail: err.message });
           res.json({ message: '노약자 정보 등록 완료', ward_id: this.lastID });
-        });
+        }
+      );
     });
   });
 });
@@ -168,7 +192,8 @@ function checkNoMovement() {
 
     rows.forEach(row => {
       const timeDiff = now - row.last_moved_at;
-      const overOneHour = timeDiff > 20 * 1000;
+      const overOneHour = timeDiff > 3600 * 1000;  // 1시간(3600초) 이상 정지 여부
+
 
       if (!overOneHour) return;
 
@@ -201,7 +226,10 @@ function checkNoMovement() {
 }
 
 // ✅ 주기적으로 실행 (5분마다)
-setInterval(checkNoMovement, 20* 1000);
+setInterval(checkNoMovement, 5 * 60 * 1000);    // 5분(300초)마다 감지 체크 주기
+
+// 실종자 조회
+app.use('/missing_wards', missingWardsRouter);
 
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 const PORT = process.env.PORT || 3000;

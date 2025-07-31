@@ -6,17 +6,20 @@ const db = new sqlite3.Database('nolbom.db');
 db.serialize(() => {
   // users 테이블 (공통 회원 정보)
   db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      name TEXT NOT NULL,
-      birthdate TEXT NOT NULL,
-      phone TEXT NOT NULL,
-      role TEXT NOT NULL CHECK (role IN ('guardian', 'ward')),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  CREATE TABLE IF NOT EXISTS users (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT    UNIQUE NOT NULL,
+    password   TEXT    NOT NULL,
+    name       TEXT    NOT NULL,
+    birthdate  TEXT    NOT NULL,
+    phone      TEXT    NOT NULL,
+    role       TEXT    NOT NULL CHECK (role IN ('guardian', 'ward')),
+    height     REAL,          -- 신장(cm) or m 단위로 저장
+    weight     REAL,          -- 체중(kg) 저장
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
 
   // guardians 테이블 (보호자 전용 정보)
   db.run(`

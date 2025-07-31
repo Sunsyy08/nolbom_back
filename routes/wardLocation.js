@@ -1,3 +1,4 @@
+// routes/wardLocation.js
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
@@ -9,7 +10,8 @@ function getDistance(lat1, lon1, lat2, lon2) {
   const toRad = deg => deg * Math.PI / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
-  const a = Math.sin(dLat / 2) ** 2 +
+  const a =
+    Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
     Math.sin(dLon / 2) ** 2;
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
@@ -22,27 +24,31 @@ function notifyGuardian(message) {
 }
 
 // 1️⃣ 집 위치 등록
+// POST /ward/home
 router.post('/home', auth, (req, res) => {
-  const { lat, lng, radius } = req.body;
+  const { safe_lat, safe_lng, safe_radius } = req.body;
   const userId = req.user.user_id;
-  if (lat == null || lng == null) {
-    return res.status(400).json({ error: '위도와 경도가 필요합니다' });
-  }
 
-  const safeRadius = radius != null ? radius : 100;
+  if (safe_lat == null || safe_lng == null) {
+    return res.status(400).json({ error: 'safe_lat와 safe_lng가 필요합니다' });
+  }
+  const radius = safe_radius != null ? safe_radius : 100;
+
   db.get(
     `SELECT id FROM wards WHERE user_id = ?`,
     [userId],
     (err, ward) => {
-      if (err) return res.status(500).json({ error: 'DB 오류' });
+      if (err) return res.status(500).json({ error: 'DB 오류', detail: err.message });
       if (!ward) return res.status(404).json({ error: '노약자 정보 없음' });
 
       db.run(
-        `UPDATE wards SET safe_lat=?, safe_lng=?, safe_radius=? WHERE id=?`,
-        [lat, lng, safeRadius, ward.id],
+        `UPDATE wards
+           SET safe_lat = ?, safe_lng = ?, safe_radius = ?
+         WHERE id = ?`,
+        [safe_lat, safe_lng, radius, ward.id],
         err => {
-          if (err) return res.status(500).json({ error: '집 등록 실패' });
-          return res.json({ success: true, message: '집 위치 등록 완료' });
+          if (err) return res.status(500).json({ error: '집 등록 실패', detail: err.message });
+          res.json({ success: true, message: '집 위치 등록 완료' });
         }
       );
     }
@@ -50,6 +56,7 @@ router.post('/home', auth, (req, res) => {
 });
 
 // 2️⃣ 위치 업데이트 및 알림 처리
+// POST /ward/location
 router.post('/location', auth, (req, res) => {
   const { lat, lng } = req.body;
   const userId = req.user.user_id;
@@ -60,84 +67,112 @@ router.post('/location', auth, (req, res) => {
   }
 
   // 1) 노약자 + 집 정보 조회
-  const sqlWard = `
-    SELECT w.id AS ward_id, u.name, w.safe_lat, w.safe_lng, w.safe_radius
-    FROM wards w
-    JOIN users u ON w.user_id = u.id
-    WHERE w.user_id = ?
-  `;
-  db.get(sqlWard, [userId], (err, ward) => {
-    if (err) return res.status(500).json({ error: 'DB 오류' });
-    if (!ward) return res.status(404).json({ error: '노약자 정보 없음' });
+  db.get(
+    `SELECT
+       w.id            AS ward_id,
+       u.name          AS name,
+       w.safe_lat,
+       w.safe_lng,
+       w.safe_radius
+     FROM wards w
+     JOIN users u ON w.user_id = u.id
+     WHERE w.user_id = ?`,
+    [userId],
+    (err, ward) => {
+      if (err) return res.status(500).json({ error: 'DB 오류', detail: err.message });
+      if (!ward) return res.status(404).json({ error: '노약자 정보 없음' });
 
-    // 2) 기존 상태 조회
-    db.get(`SELECT * FROM ward_status WHERE ward_id = ?`, [ward.ward_id], (err, status) => {
-      if (err) return res.status(500).json({ error: '상태 조회 실패' });
+      // 2) 기존 상태 조회
+      db.get(
+        `SELECT * FROM ward_status WHERE ward_id = ?`,
+        [ward.ward_id],
+        (err, status) => {
+          if (err) return res.status(500).json({ error: '상태 조회 실패', detail: err.message });
 
-      // 2-1) 최초 호출: 레코드 없으면 INSERT + '집입니다(출발 전)' 알림
-      if (!status) {
-        db.run(
-          `INSERT INTO ward_status (ward_id, is_outside, alert_interval, last_alert_time)
-           VALUES (?, 0, 10, ?)`,
-          [ward.ward_id, now],
-          err => {
-            if (err) return res.status(500).json({ error: '상태 초기화 실패' });
-            // 위치 저장
-            db.run(`INSERT INTO locations (ward_id, lat, lng) VALUES (?, ?, ?)`, [ward.ward_id, lat, lng]);
-            // 최초 집 알림
-            notifyGuardian(`${ward.name}님은 집입니다 (출발 전)`);
-            return res.json({ success: true, message: '초기 상태(home) 저장됨' });
+          // 2-1) 최초 호출: 레코드 없으면 INSERT + '집입니다(출발 전)' 알림
+          if (!status) {
+            db.run(
+              `INSERT INTO ward_status (
+                 ward_id,
+                 is_outside,
+                 last_lat,
+                 last_lng,
+                 last_moved_at,
+                 alert_interval,
+                 last_alert_time
+               ) VALUES (?, 0, ?, ?, ?, 10, ?)`,
+              [ward.ward_id, lat, lng, now, now],
+              err => {
+                if (err) return res.status(500).json({ error: '상태 초기화 실패', detail: err.message });
+                // 위치 기록
+                db.run(
+                  `INSERT INTO locations (ward_id, lat, lng) VALUES (?, ?, ?)`,
+                  [ward.ward_id, lat, lng]
+                );
+                notifyGuardian(`${ward.name}님은 집입니다 (출발 전)`);
+                return res.json({ success: true, message: '초기 상태(home) 저장됨' });
+              }
+            );
+            return;
           }
-        );
-        return;
-      }
 
-        // 위치 이동 감지 및 last_moved_at 갱신
-  const prevLat = status.last_lat;
-  const prevLng = status.last_lng;
-      // 3) 거리 계산 + 위치 저장
-      const distance = getDistance(lat, lng, ward.safe_lat, ward.safe_lng);
-      const safeRadius = ward.safe_radius != null ? ward.safe_radius : 100;
-      const isOutside = status.is_outside === 1;
-      db.run(`INSERT INTO locations (ward_id, lat, lng) VALUES (?, ?, ?)`, [ward.ward_id, lat, lng]);
+          // 3) 거리 계산 및 위치 저장
+          const distance = getDistance(lat, lng, ward.safe_lat, ward.safe_lng);
+          db.run(
+            `INSERT INTO locations (ward_id, lat, lng) VALUES (?, ?, ?)`,
+            [ward.ward_id, lat, lng]
+          );
 
-      // 이동한 거리 계산 (이전 좌표가 있을 때만)
-      let moved = false;
-      if (prevLat != null && prevLng != null) {
-        const moveDist = getDistance(lat, lng, prevLat, prevLng);
-        moved = moveDist > 10;  // 10m 이상이면 이동으로 판단
-      }
+          // 4) 이동 여부 판단 후 last_moved_at 업데이트
+          const prevLat = status.last_lat;
+          const prevLng = status.last_lng;
+          let moved = false;
+          if (prevLat != null && prevLng != null) {
+            const moveDist = getDistance(lat, lng, prevLat, prevLng);
+            moved = moveDist > 10; // 10m 이상이면 이동으로 판단
+          }
+          db.run(
+            `UPDATE ward_status
+               SET last_lat = ?, last_lng = ?,
+                   last_moved_at = CASE WHEN ? THEN ? ELSE last_moved_at END
+             WHERE ward_id = ?`,
+            [lat, lng, moved, now, ward.ward_id]
+          );
 
-      // 위치 및 이동시간 업데이트
-      const updateStatusSql = `
-  UPDATE ward_status
-  SET last_lat = ?, last_lng = ?,
-      last_moved_at = CASE WHEN ? THEN ? ELSE last_moved_at END
-  WHERE ward_id = ?
-`;
-      db.run(updateStatusSql, [lat, lng, moved, now, ward.ward_id]);
+          const wasOutside = status.is_outside === 1;
+          const nowOutside = distance > ward.safe_radius;
 
-      // 4) 상태 전환 및 알림
-      if (distance > safeRadius && !isOutside) {
-        // 집 → 외출
-        notifyGuardian(`${ward.name}님이 외출했습니다 (${new Date(now).toLocaleTimeString()})`);
-        db.run(`UPDATE ward_status SET is_outside=1, last_alert_time=? WHERE ward_id=?`, [now, ward.ward_id]);
-      }
-      else if (distance > safeRadius && isOutside && now - status.last_alert_time >= (status.alert_interval || 10) * 1000) {
-        // 외출 중 반복 (별도 스케줄러 없이 호출 시)
-        notifyGuardian(`${ward.name}님이 외출 중입니다 (${new Date(now).toLocaleTimeString()})`);
-        db.run(`UPDATE ward_status SET last_alert_time=? WHERE ward_id=?`, [now, ward.ward_id]);
-      }
-      else if (distance <= safeRadius && isOutside) {
-        // 귀가 → '집입니다(귀가 후)'
-        notifyGuardian(`${ward.name}님은 집입니다 (귀가 후)`);
-        db.run(`UPDATE ward_status SET is_outside=0, last_alert_time=? WHERE ward_id=?`, [now, ward.ward_id]);
-      }
+          // 5) 상태 전환 및 알림
+          if (nowOutside && !wasOutside) {
+            notifyGuardian(`${ward.name}님이 외출했습니다 (${new Date(now).toLocaleTimeString()})`);
+            db.run(
+              `UPDATE ward_status SET is_outside = 1, last_alert_time = ? WHERE ward_id = ?`,
+              [now, ward.ward_id]
+            );
+          } else if (nowOutside && wasOutside &&
+                     now - status.last_alert_time >= (status.alert_interval || 10) * 1000) {
+            notifyGuardian(`${ward.name}님이 외출 중입니다 (${new Date(now).toLocaleTimeString()})`);
+            db.run(
+              `UPDATE ward_status SET last_alert_time = ? WHERE ward_id = ?`,
+              [now, ward.ward_id]
+            );
+          } else if (!nowOutside && wasOutside) {
+            notifyGuardian(`${ward.name}님은 집입니다 (귀가 후)`);
+            db.run(
+              `UPDATE ward_status SET is_outside = 0, last_alert_time = ? WHERE ward_id = ?`,
+              [now, ward.ward_id]
+            );
+          }
 
-      // 응답
-      return res.json({ success: true, distance: distance.toFixed(2), isOutside });
-    });
-  });
+          return res.json({
+            success: true,
+            distance: Number(distance.toFixed(2)),
+            isOutside: nowOutside ? 1 : 0
+          });
+        }
+      );
+    }
+  );
 });
 
 module.exports = router;
