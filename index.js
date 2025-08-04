@@ -1,58 +1,108 @@
 // index.js
+require('dotenv').config();
+
 const express = require('express');
+const cors = require('cors');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const http = require('http');
+const { Server } = require('socket.io');
+
 const db = require('./db');
 const wardLocationRouter = require('./routes/wardLocation');
-const auth = require('./middlewares/auth');    
-const authenticateToken = require('./middlewares/auth');
 const missingWardsRouter = require('./routes/missingWard');
+const auth = require('./middlewares/auth');
+
+
+const app = express();
+
+app.use(cors());                   // ← 모든 도메인 허용 (개발용)
+app.use(express.json());           // ← JSON 바디 파싱
+app.use(bodyParser.json());
+
+
+
+
 
 
 const JWT_SECRET = 'my_secret_key';
+const PORT = process.env.PORT || 3000;
 
-const app = express();
-const http = require('http');  
+
+
+
+const authenticateToken = require('./middlewares/auth');
 const server = http.createServer(app);           // http 서버
-const { Server } = require('socket.io');               // socket.io
 const io = new Server(server, { cors: { origin: '*' } });   // WebSocket 허용
 
 
-app.use(bodyParser.json());
-
 // ✅ 1. 공통 회원가입 API (/signup)
+// 1) 첫 화면용: 기본 회원가입 (/signup)
+//    name, email, password 세 가지만 받아 users 테이블에 INSERT
 app.post('/signup', async (req, res) => {
-  const { email, password, name, birthdate, phone, role, height, weight } = req.body;
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) {
+    return res.status(400).json({
+      error: '필수 필드(name, email, password)가 누락되었습니다.'
+    });
+  }
 
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    db.run(
-      `INSERT INTO users (
-         email, password, name, birthdate, phone, role, height, weight
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [email, hashedPassword, name, birthdate, phone, role, height, weight],
-      function (err) {
-        if (err) {
-          console.error('회원가입 실패:', err);
-          return res.status(500).json({ error: '회원가입 실패', detail: err.message });
-        }
-
-        res.json({
-          success: true,
-          message: `${role === 'guardian' ? '보호자' : '노약자'} 회원가입 성공`,
-          user_id: this.lastID
-        });
+    const hash = await bcrypt.hash(password, 10);
+    const sql  = `
+      INSERT INTO users (name, email, password)
+      VALUES (?, ?, ?)
+    `;
+    db.run(sql, [name, email, hash], function(err) {
+      if (err) {
+        console.error('기본 회원가입 실패:', err);
+        return res.status(500).json({ error: 'DB 오류', detail: err.message });
       }
-    );
-  } catch (err) {
-    console.error('서버 오류:', err);
-    res.status(500).json({ error: '서버 오류', detail: err.message });
+      // 생성된 user_id를 반환
+      res.status(201).json({
+        success: true,
+        user_id: this.lastID
+      });
+    });
+  } catch (e) {
+    console.error('서버 오류:', e);
+    res.status(500).json({ error: '서버 오류', detail: e.message });
   }
 });
 
-  
+// 2) 두 번째 화면용: 추가 정보 저장 (/extra/:user_id)
+//    birthdate, phone, gender, role 네 가지 받아서 해당 user 레코드 UPDATE
+app.post('/extra/:user_id', (req, res) => {
+  const userId = Number(req.params.user_id);
+  const { birthdate, phone, gender, role } = req.body;
+
+  if (!birthdate || !phone || !gender || !role) {
+    return res.status(400).json({
+      error: 'birthdate, phone, gender, role이 모두 필요합니다.'
+    });
+  }
+
+  const sql = `
+    UPDATE users
+       SET birthdate = ?,
+           phone     = ?,
+           gender    = ?,
+           role      = ?
+     WHERE id = ?
+  `;
+  db.run(sql, [birthdate, phone, gender, role, userId], function(err) {
+    if (err) {
+      console.error('추가 정보 저장 실패:', err);
+      return res.status(500).json({ error: 'DB 오류', detail: err.message });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ error: '해당 user_id를 찾을 수 없습니다.' });
+    }
+    res.json({ success: true, message: '추가 정보 저장 완료' });
+  });
+});
+
 
 // ✅ 2. 보호자 정보 추가 API (/signup/guardian/:user_id)
 app.post('/signup/guardian/:user_id', (req, res) => {
@@ -120,7 +170,7 @@ app.post('/signup/ward/:user_id', (req, res) => {
            safe_lng
          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [userId, gender, medical_info, home_address, photo_url, safe_lat, safe_lng],
-        function(err) {
+        function (err) {
           if (err) return res.status(500).json({ error: '노약자 등록 실패', detail: err.message });
           res.json({ message: '노약자 정보 등록 완료', ward_id: this.lastID });
         }
@@ -232,7 +282,6 @@ setInterval(checkNoMovement, 5 * 60 * 1000);    // 5분(300초)마다 감지 체
 app.use('/missing_wards', missingWardsRouter);
 
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
 });

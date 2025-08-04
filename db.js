@@ -11,9 +11,10 @@ db.serialize(() => {
     email      TEXT    UNIQUE NOT NULL,
     password   TEXT    NOT NULL,
     name       TEXT    NOT NULL,
-    birthdate  TEXT    NOT NULL,
-    phone      TEXT    NOT NULL,
-    role       TEXT    NOT NULL CHECK (role IN ('guardian', 'ward')),
+    birthdate  TEXT    ,
+    phone      TEXT    ,
+    gender TEXT,
+    role       TEXT     CHECK (role IN ('guardian', 'ward')),
     height     REAL,          -- 신장(cm) or m 단위로 저장
     weight     REAL,          -- 체중(kg) 저장
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -37,7 +38,6 @@ db.run(`
 CREATE TABLE IF NOT EXISTS wards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
-  gender TEXT,
   medical_info TEXT,
   home_address TEXT,
   photo_url TEXT,
