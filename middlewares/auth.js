@@ -1,6 +1,7 @@
 // middlewares/auth.js
 const jwt = require('jsonwebtoken');
 
+
 // JWT 비밀키 - .env에서 불러오는 방식으로 바꿔도 됨
 const JWT_SECRET = 'my_secret_key';
 
