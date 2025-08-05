@@ -24,13 +24,15 @@ db.serialize(() => {
 
   // guardians 테이블 (보호자 전용 정보)
   db.run(`
-    CREATE TABLE IF NOT EXISTS guardians (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      address TEXT,
-      relation TEXT,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-    )
+  CREATE TABLE IF NOT EXISTS guardians (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    ward_id    INTEGER NOT NULL,
+    address    TEXT,
+    relation   TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
+  );
   `);
 
   // wards 테이블 (노약자 전용 정보)

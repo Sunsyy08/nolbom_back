@@ -105,33 +105,59 @@ app.post('/extra/:user_id', (req, res) => {
 
 
 // ✅ 2. 보호자 정보 추가 API (/signup/guardian/:user_id)
+// ✅ 2. 보호자 정보 추가 API (/signup/guardian/:user_id)
 app.post('/signup/guardian/:user_id', (req, res) => {
   const { user_id } = req.params;
-  const { address, relation } = req.body;
+  const { wardEmail, address, relation } = req.body;
 
-  // 1. 먼저 users 테이블에서 해당 user_id가 존재하는지 확인
-  db.get(`SELECT * FROM users WHERE id = ?`, [user_id], (err, user) => {
-    if (err) return res.status(500).json({ error: '유저 확인 실패', detail: err.message });
-    if (!user) return res.status(400).json({ error: '존재하지 않는 사용자입니다' });
+  if (!wardEmail) {
+    return res.status(400).json({ error: 'wardEmail이 필요합니다.' });
+  }
 
-    // 2. guardians 테이블에서 중복 등록 확인
-    db.get(`SELECT * FROM guardians WHERE user_id = ?`, [user_id], (err, existing) => {
-      if (err) return res.status(500).json({ error: '중복 확인 실패', detail: err.message });
-      if (existing) return res.status(400).json({ error: '이미 등록된 보호자입니다' });
+  // 1. 보호자 사용자(user_id) 존재 확인
+  db.get(
+    `SELECT * FROM users WHERE id = ?`,
+    [user_id],
+    (err, user) => {
+      if (err) return res.status(500).json({ error: '유저 확인 실패', detail: err.message });
+      if (!user) return res.status(400).json({ error: '존재하지 않는 사용자입니다' });
 
-      // 3. 중복 없고 유저 존재하면 삽입
-      db.run(
-        `INSERT INTO guardians (user_id, address, relation)
-         VALUES (?, ?, ?)`,
-        [user_id, address, relation],
-        function (err) {
-          if (err) return res.status(500).json({ error: '보호자 정보 저장 실패', detail: err.message });
-          res.json({ success: true, message: '보호자 정보 등록 완료' });
+      // 2. wardEmail로 노약자 조회
+      db.get(
+        `SELECT id FROM users WHERE email = ? AND role = 'ward'`,
+        [wardEmail],
+        (err, ward) => {
+          if (err) return res.status(500).json({ error: '노약자 조회 실패', detail: err.message });
+          if (!ward) return res.status(404).json({ error: '등록된 노약자를 찾을 수 없습니다.' });
+
+          const ward_id = ward.id;
+
+          // 3. guardians 테이블에서 중복 등록 확인
+          db.get(
+            `SELECT * FROM guardians WHERE user_id = ? AND ward_id = ?`,
+            [user_id, ward_id],
+            (err, existing) => {
+              if (err) return res.status(500).json({ error: '중복 확인 실패', detail: err.message });
+              if (existing) return res.status(400).json({ error: '이미 등록된 보호자-노약자 관계입니다' });
+
+              // 4. 중복 없고 모두 확인되면 삽입
+              db.run(
+                `INSERT INTO guardians (user_id, ward_id, address, relation)
+                 VALUES (?, ?, ?, ?)`,
+                [user_id, ward_id, address, relation],
+                function (err) {
+                  if (err) return res.status(500).json({ error: '보호자 정보 저장 실패', detail: err.message });
+                  res.status(201).json({ success: true, message: '보호자 정보 등록 완료', guardianId: this.lastID });
+                }
+              );
+            }
+          );
         }
       );
-    });
-  });
+    }
+  );
 });
+
 
 
 // ✅ 3. 노약자 정보 추가 API (/signup/ward/:user_id)
