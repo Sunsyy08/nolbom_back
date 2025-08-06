@@ -167,61 +167,56 @@ app.post('/signup/ward/:user_id', (req, res) => {
   console.log('▶ signupWard body:', req.body);
   const userId = Number(req.params.user_id);
   const {
-    height,           // Float, e.g. 170.5
-    weight,           // Float, e.g. 65.2
-    medical_status,   // String, e.g. '고혈압, 당뇨'
-    home_address      // String, e.g. '서울시 강남구 ...'
+    height,           // Float
+    weight,           // Float
+    medical_status,   // String
+    home_address,     // String
+    safe_lat,         // Double
+    safe_lng,         // Double
+    safe_radius       // Integer
   } = req.body;
 
-  // 1) 필수 값 체크
-  if (![height, weight, medical_status, home_address].every(v => v !== undefined && v !== "")) {
+  // 1) 필수 값 체크 (원하시면 safe_* 도 포함)
+  if (![height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius]
+        .every(v => v !== undefined && v !== "")) {
     return res.status(400).json({ error: '모든 정보를 입력해야 합니다.' });
   }
 
   // 2) 공통 회원 확인
-  db.get(
-    `SELECT * FROM users WHERE id = ?`,
-    [userId],
-    (err, user) => {
+  db.get(`SELECT * FROM users WHERE id = ?`, [userId], (err, user) => {
+    if (err) return res.status(500).json({ error: 'DB 에러', detail: err.message });
+    if (!user) return res.status(400).json({ error: '공통 회원가입이 선행되어야 합니다.' });
+    if (user.role !== 'ward') return res.status(400).json({ error: '해당 계정은 노약자 전용이 아닙니다.' });
+
+    // 3) 이미 등록된 노약자인지 확인
+    db.get(`SELECT * FROM wards WHERE user_id = ?`, [userId], (err, ward) => {
       if (err) return res.status(500).json({ error: 'DB 에러', detail: err.message });
-      if (!user) return res.status(400).json({ error: '공통 회원가입이 선행되어야 합니다.' });
-      if (user.role !== 'ward') return res.status(400).json({ error: '해당 계정은 노약자 전용이 아닙니다.' });
+      if (ward) return res.status(400).json({ error: '이미 등록된 노약자입니다.' });
 
-      // 3) 이미 등록된 노약자인지 확인
-      db.get(
-        `SELECT * FROM wards WHERE user_id = ?`,
-        [userId],
-        (err, ward) => {
-          if (err) return res.status(500).json({ error: 'DB 에러', detail: err.message });
-          if (ward) return res.status(400).json({ error: '이미 등록된 노약자입니다.' });
-
-          // 4) 등록 실행
-          const sql = `
-            INSERT INTO wards
-              (user_id, height, weight, medical_status, home_address)
-            VALUES (?, ?, ?, ?, ?)
-          `;
-          db.run(
-            sql,
-            [userId, height, weight, medical_status, home_address],
-            function (err) {
-              if (err) {
-                console.error('INSERT ERROR:', err);
-                return res.status(500).json({ error: '노약자 등록 실패', detail: err.message });
-              }
-              res.json({
-                success: true,
-                message: '노약자 정보 등록 완료',
-                ward_id: this.lastID
-              });
-            }
-          );
+      // 4) 등록 실행: safe_lat, safe_lng, safe_radius 추가
+      const sql = `
+        INSERT INTO wards
+          (user_id, height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+      db.run(
+        sql,
+        [userId, height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius],
+        function (err) {
+          if (err) {
+            console.error('INSERT ERROR:', err);
+            return res.status(500).json({ error: '노약자 등록 실패', detail: err.message });
+          }
+          res.json({
+            success: true,
+            message: '노약자 정보 등록 완료',
+            ward_id: this.lastID
+          });
         }
       );
-    }
-  );
+    });
+  });
 });
-
 
 
 // ✅ 4. 로그인 + JWT 토큰 발급 API (/login)
