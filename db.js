@@ -44,13 +44,14 @@ db.serialize(() => {
     weight          REAL    DEFAULT 0,
     medical_status  TEXT    DEFAULT '',
     home_address    TEXT    DEFAULT '',
-    photo_url       TEXT,
+    profile_image   TEXT,
     safe_lat        REAL,
     safe_lng        REAL,
     safe_radius     REAL,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   );
 `);
+db.run(`ALTER TABLE wards ADD COLUMN profile_image_data BLOB;`);
 db.run(`
   CREATE TABLE IF NOT EXISTS ward_status (
     ward_id        INTEGER PRIMARY KEY,                        -- wards.id와 1:1

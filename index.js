@@ -8,6 +8,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const http = require('http');
 const { Server } = require('socket.io');
+const multer       = require('multer');
+const storage      = multer.memoryStorage();
+const upload = multer({ storage: multer.memoryStorage() });
+
+const FormDataLib  = require('form-data');
+const axios        = require('axios');    
+
 
 const db = require('./db');
 const wardLocationRouter = require('./routes/wardLocation');
@@ -20,15 +27,12 @@ const app = express();
 app.use(cors());                   // ← 모든 도메인 허용 (개발용)
 app.use(express.json());           // ← JSON 바디 파싱
 app.use(bodyParser.json());
-
-
-
+app.use(bodyParser.urlencoded({ extended: true }));
 
 
 
 const JWT_SECRET = 'my_secret_key';
 const PORT = process.env.PORT || 3000;
-
 
 
 
@@ -106,7 +110,10 @@ app.post('/extra/:user_id', (req, res) => {
 
 // ✅ 2. 보호자 정보 추가 API (/signup/guardian/:user_id)
 // ✅ 2. 보호자 정보 추가 API (/signup/guardian/:user_id)
-app.post('/signup/guardian/:user_id', (req, res) => {
+app.post('/signup/guardian/:user_id', upload.fields([
+  { name: 'profile_image_file', maxCount: 1 },
+  // 텍스트 필드는 Multer가 자동으로 req.body로 넣어줌
+]), (req, res) => {
   const { user_id } = req.params;
   const { wardEmail, address, relation } = req.body;
 
@@ -163,60 +170,91 @@ app.post('/signup/guardian/:user_id', (req, res) => {
 // ✅ 3. 노약자 정보 추가 API (/signup/ward/:user_id)
 // 노약자 회원가입
 // 노약자 회원가입
-app.post('/signup/ward/:user_id', (req, res) => {
-  console.log('▶ signupWard body:', req.body);
-  const userId = Number(req.params.user_id);
-  const {
-    height,           // Float
-    weight,           // Float
-    medical_status,   // String
-    home_address,     // String
-    safe_lat,         // Double
-    safe_lng,         // Double
-    safe_radius       // Integer
-  } = req.body;
+app.post(
+  '/signup/ward/:user_id',
+  upload.single('profile_image_file'),
+  (req, res) => {
+    console.log('▶ signupWard body:', req.body);
+    console.log('▶ signupWard file:', req.file);
 
-  // 1) 필수 값 체크 (원하시면 safe_* 도 포함)
-  if (![height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius]
-        .every(v => v !== undefined && v !== "")) {
-    return res.status(400).json({ error: '모든 정보를 입력해야 합니다.' });
-  }
+    const userId = Number(req.params.user_id);
+    const {
+      height,         // Float
+      weight,         // Float
+      medical_status, // String
+      home_address,   // String
+      safe_lat,       // Double
+      safe_lng,       // Double
+      safe_radius     // Integer
+    } = req.body;
 
-  // 2) 공통 회원 확인
-  db.get(`SELECT * FROM users WHERE id = ?`, [userId], (err, user) => {
-    if (err) return res.status(500).json({ error: 'DB 에러', detail: err.message });
-    if (!user) return res.status(400).json({ error: '공통 회원가입이 선행되어야 합니다.' });
-    if (user.role !== 'ward') return res.status(400).json({ error: '해당 계정은 노약자 전용이 아닙니다.' });
+    // 업로드된 이미지 버퍼
+    const imageBuffer = req.file?.buffer;
+    if (!imageBuffer) {
+      return res
+        .status(400)
+        .json({ error: '프로필 이미지를 첨부해야 합니다.' });
+    }
 
-    // 3) 이미 등록된 노약자인지 확인
-    db.get(`SELECT * FROM wards WHERE user_id = ?`, [userId], (err, ward) => {
+    // 1) 필수 값 체크 (이미지도 포함)
+    if (
+      ![height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius]
+        .every(v => v !== undefined && v !== "")
+    ) {
+      return res
+        .status(400)
+        .json({ error: '모든 정보를 입력해야 합니다.' });
+    }
+
+    // 2) 공통 회원 확인
+    db.get(`SELECT * FROM users WHERE id = ?`, [userId], (err, user) => {
       if (err) return res.status(500).json({ error: 'DB 에러', detail: err.message });
-      if (ward) return res.status(400).json({ error: '이미 등록된 노약자입니다.' });
+      if (!user) return res.status(400).json({ error: '공통 회원가입이 선행되어야 합니다.' });
+      if (user.role !== 'ward') return res.status(400).json({ error: '해당 계정은 노약자 전용이 아닙니다.' });
 
-      // 4) 등록 실행: safe_lat, safe_lng, safe_radius 추가
-      const sql = `
-        INSERT INTO wards
-          (user_id, height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `;
-      db.run(
-        sql,
-        [userId, height, weight, medical_status, home_address, safe_lat, safe_lng, safe_radius],
-        function (err) {
-          if (err) {
-            console.error('INSERT ERROR:', err);
-            return res.status(500).json({ error: '노약자 등록 실패', detail: err.message });
+      // 3) 이미 등록된 노약자인지 확인
+      db.get(`SELECT * FROM wards WHERE user_id = ?`, [userId], (err, ward) => {
+        if (err) return res.status(500).json({ error: 'DB 에러', detail: err.message });
+        if (ward) return res.status(400).json({ error: '이미 등록된 노약자입니다.' });
+
+        // 4) INSERT (BLOB 컬럼에 imageBuffer 직접 전달)
+        const sql = `
+          INSERT INTO wards
+            (user_id, height, weight, medical_status,
+             home_address, profile_image_data,
+             safe_lat, safe_lng, safe_radius)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        db.run(
+          sql,
+          [
+            userId,
+            height,
+            weight,
+            medical_status,
+            home_address,
+            imageBuffer,  // ← BLOB 컬럼
+            safe_lat,
+            safe_lng,
+            safe_radius
+          ],
+          function (err) {
+            if (err) {
+              console.error('INSERT ERROR:', err);
+              return res.status(500).json({ error: '노약자 등록 실패', detail: err.message });
+            }
+            res.json({
+              success: true,
+              message: '노약자 정보 등록 완료',
+              ward_id: this.lastID
+            });
           }
-          res.json({
-            success: true,
-            message: '노약자 정보 등록 완료',
-            ward_id: this.lastID
-          });
-        }
-      );
+        );
+      });
     });
-  });
-});
+  }
+);
+
 
 
 // ✅ 4. 로그인 + JWT 토큰 발급 API (/login)
@@ -319,6 +357,46 @@ setInterval(checkNoMovement, 5 * 60 * 1000);    // 5분(300초)마다 감지 체
 
 // 실종자 조회
 app.use('/missing_wards', missingWardsRouter);
+
+app.post('/capture', upload.single('file'), async (req, res) => {
+  console.log('axios:', axios);
+  console.log('>>> /capture req.file:', req.file);
+
+  if (!req.file) {
+    return res.status(400).json({ success:false, message:'업로드된 파일이 없습니다.' });
+  }
+
+  // form-data 패키지로 생성
+  const form = new FormDataLib();
+  form.append('file', req.file.buffer, {
+    filename: req.file.originalname,
+    contentType: req.file.mimetype
+  });
+
+  try {
+    const apiRes = await axios.post(
+      'http://127.0.0.1:5500/capture',
+      form,
+      {
+        headers: form.getHeaders(),
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      }
+    );
+    console.log('>>> FastAPI 응답:', apiRes.data);
+    return res.status(apiRes.status).json(apiRes.data);
+
+  } catch (e) {
+    console.error('>>> FastAPI 호출 중 오류:', e.response?.status, e.response?.data || e.message);
+    return res.status(500).json({
+      success: false,
+      message: '프록시 오류',
+      detail: e.response?.data || e.message
+    });
+  }
+});
+
+
 
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 server.listen(PORT, '0.0.0.0', () => {
