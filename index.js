@@ -548,6 +548,141 @@ app.get('/user/profile-image', authenticateToken, (req, res) => {
   });
 });
 
+// 기존 코드에 추가할 프로필 화면용 API (조회만)
+
+// ✅ 프로필 정보 조회 API (프로필 화면용)
+app.get('/user/full-profile', authenticateToken, (req, res) => {
+  const userId = req.user.user_id;
+  
+  // users 테이블에서 기본 정보 조회
+  const userSql = `
+    SELECT id, name, email, role, birthdate, phone, gender 
+    FROM users 
+    WHERE id = ?
+  `;
+  
+  db.get(userSql, [userId], (err, user) => {
+    if (err) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'DB 오류', 
+        detail: err.message 
+      });
+    }
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        error: '사용자를 찾을 수 없습니다.' 
+      });
+    }
+
+    // 생년월일 포맷팅 함수
+    const formatBirthDate = (birthdate) => {
+      if (!birthdate) return null;
+      const date = new Date(birthdate);
+      return date.toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    };
+
+    // 사용자 타입에 따른 한국어 변환
+    const getUserTypeKorean = (role) => {
+      switch(role) {
+        case 'ward': return '노약자';
+        case 'guardian': return '보호자';
+        default: return '사용자';
+      }
+    };
+
+    // 노약자인 경우 추가 정보 조회
+    if (user.role === 'ward') {
+      const wardSql = `
+        SELECT home_address, profile_image_data
+        FROM wards 
+        WHERE user_id = ?
+      `;
+      
+      db.get(wardSql, [userId], (err, wardInfo) => {
+        if (err) {
+          return res.status(500).json({ 
+            success: false, 
+            error: 'DB 오류', 
+            detail: err.message 
+          });
+        }
+
+        // 프로필 이미지를 Base64로 인코딩
+        let profileImageBase64 = null;
+        if (wardInfo && wardInfo.profile_image_data) {
+          profileImageBase64 = `data:image/jpeg;base64,${wardInfo.profile_image_data.toString('base64')}`;
+        }
+
+        res.json({
+          success: true,
+          profile: {
+            name: user.name,
+            email: user.email,
+            userType: getUserTypeKorean(user.role),
+            birthDate: formatBirthDate(user.birthdate),
+            phoneNumber: user.phone || null,
+            address: wardInfo?.home_address || null,
+            profileImage: profileImageBase64
+          }
+        });
+      });
+    } 
+    // 보호자인 경우
+    else if (user.role === 'guardian') {
+      const guardianSql = `
+        SELECT address 
+        FROM guardians 
+        WHERE user_id = ? 
+        LIMIT 1
+      `;
+      
+      db.get(guardianSql, [userId], (err, guardianInfo) => {
+        if (err) {
+          return res.status(500).json({ 
+            success: false, 
+            error: 'DB 오류', 
+            detail: err.message 
+          });
+        }
+
+        res.json({
+          success: true,
+          profile: {
+            name: user.name,
+            email: user.email,
+            userType: getUserTypeKorean(user.role),
+            birthDate: formatBirthDate(user.birthdate),
+            phoneNumber: user.phone || null,
+            address: guardianInfo?.address || null,
+            profileImage: null // 보호자는 프로필 이미지가 없음
+          }
+        });
+      });
+    }
+    // 기본 사용자인 경우
+    else {
+      res.json({
+        success: true,
+        profile: {
+          name: user.name,
+          email: user.email,
+          userType: getUserTypeKorean(user.role),
+          birthDate: formatBirthDate(user.birthdate),
+          phoneNumber: user.phone || null,
+          address: null,
+          profileImage: null
+        }
+      });
+    }
+  });
+});
 
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 server.listen(PORT, '0.0.0.0', () => {
