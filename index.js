@@ -20,6 +20,7 @@ const db = require('./db');
 const wardLocationRouter = require('./routes/wardLocation');
 const missingWardsRouter = require('./routes/missingWard');
 const auth = require('./middlewares/auth');
+const emergencyRoutes = require('./routes/emergency');
 
 
 const app = express();
@@ -684,7 +685,16 @@ app.get('/user/full-profile', authenticateToken, (req, res) => {
   });
 });
 
+// 응급 신고 라우터 연결
+app.use('/api/emergency', emergencyRoutes);
+
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  // 서버 시작 부분에 로그 추가 (기존 console.log 아래에)
+console.log('📋 응급 신고 API: /api/emergency');
+console.log('  - 신고 저장: POST /api/emergency/report');
+console.log('  - 신고 목록: GET /api/emergency/reports');
+console.log('  - 통계 조회: GET /api/emergency/stats/dashboard');
+console.log('  - 최근 신고: GET /api/emergency/recent');
 });

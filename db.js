@@ -82,6 +82,16 @@ CREATE TABLE IF NOT EXISTS missing_wards (
   FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
 )
 `);
+db.run(`
+    CREATE TABLE IF NOT EXISTS emergency_reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_name VARCHAR(100) NOT NULL,              -- 사용자 이름
+      detected_keyword VARCHAR(100) NOT NULL,       -- 감지된 키워드
+      ward_id INTEGER,                              -- 노약자 ID (wards 테이블 참조)
+      report_time DATETIME DEFAULT CURRENT_TIMESTAMP, -- 신고 시간
+      FOREIGN KEY(ward_id) REFERENCES wards(id)
+    )
+  `);
 });
 
 // 위치 정보
