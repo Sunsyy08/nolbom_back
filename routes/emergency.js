@@ -1,4 +1,4 @@
-// routes/emergency.js - ward_id 포함 버전으로 수정
+// routes/emergency.js - 수정된 버전
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const router = express.Router();
@@ -107,15 +107,17 @@ router.get('/reports', (req, res) => {
         }
         
         // 총 개수도 조회
-        const countSQL = `
+        let countSQL = `
             SELECT COUNT(*) as total 
             FROM emergency_reports er
             LEFT JOIN wards w ON er.ward_id = w.id
             LEFT JOIN users u ON w.user_id = u.id
             WHERE 1=1
-        ` + (user_name ? ' AND er.user_name LIKE ?' : '') + 
-            (keyword ? ' AND er.detected_keyword LIKE ?' : '') +
-            (ward_id ? ' AND er.ward_id = ?' : '');
+        `;
+        
+        if (user_name) countSQL += ' AND er.user_name LIKE ?';
+        if (keyword) countSQL += ' AND er.detected_keyword LIKE ?';
+        if (ward_id) countSQL += ' AND er.ward_id = ?';
         
         const countParams = params.slice(0, -2); // LIMIT, OFFSET 제거
         
@@ -186,10 +188,11 @@ router.get('/stats/dashboard', (req, res) => {
     });
 });
 
-// 노약자별 신고 통계
+// 노약자별 신고 통계 - 🔧 수정된 부분
 router.get('/stats/wards', (req, res) => {
     const { period = 30 } = req.query;
     
+    // 🔧 템플릿 리터럴 대신 매개변수 사용
     const sql = `
         SELECT 
             er.ward_id,
@@ -202,13 +205,13 @@ router.get('/stats/wards', (req, res) => {
         FROM emergency_reports er
         LEFT JOIN wards w ON er.ward_id = w.id
         LEFT JOIN users u ON w.user_id = u.id
-        WHERE date(er.report_time) >= date('now', '-${period} days')
+        WHERE date(er.report_time) >= date('now', '-' || ? || ' days')
         AND er.ward_id IS NOT NULL
         GROUP BY er.ward_id, u.name, u.phone, w.home_address
         ORDER BY report_count DESC
     `;
     
-    emergencyDb.all(sql, [], (err, rows) => {
+    emergencyDb.all(sql, [period], (err, rows) => {
         if (err) {
             return res.status(500).json({ 
                 success: false, 

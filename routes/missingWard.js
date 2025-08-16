@@ -10,10 +10,10 @@ router.get('/', auth, (req, res) => {
       m.id            AS missing_id,
       w.id            AS ward_id,
       u.name,
-      w.gender        AS gender,
+      u.gender        AS gender,
       u.birthdate     AS birthdate,
-      u.height        AS height,
-      u.weight        AS weight,
+      COALESCE(u.height, w.height, 0) AS height,
+      COALESCE(u.weight, w.weight, 0) AS weight,
       m.detected_at,
       m.last_lat,
       m.last_lng,
@@ -33,21 +33,5 @@ router.get('/', auth, (req, res) => {
     res.json({ missingWards: rows });
   });
 });
-
-// checkDb.js (앱 초기화 때 한 번만 실행)
-db.serialize(() => {
-    db.run(`ALTER TABLE users ADD COLUMN height REAL;`, err => {
-      // 이미 컬럼이 있으면 에러 무시
-      if (err && !/duplicate column/.test(err.message)) {
-        console.error('height 컬럼 추가 실패:', err);
-      }
-    });
-    db.run(`ALTER TABLE users ADD COLUMN weight REAL;`, err => {
-      if (err && !/duplicate column/.test(err.message)) {
-        console.error('weight 컬럼 추가 실패:', err);
-      }
-    });
-  });
-  
 
 module.exports = router;

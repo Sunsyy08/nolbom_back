@@ -1,6 +1,6 @@
 // routes/reports.js - 신고 이력 관련 API (기존 emergency_reports 활용)
 const express = require('express');
-const { db } = require('../db');
+const db = require('../db');
 const router = express.Router();
 
 // 신고 이력 저장 (Python FastAPI에서 호출)

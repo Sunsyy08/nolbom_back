@@ -1,11 +1,13 @@
 // routes/missing.js - 실종자 관련 API (기존 DB 구조 활용)
 const express = require('express');
-const { db, calculateAge } = require('../db');
+const db = require('../db');
 const router = express.Router();
 
 // 실종자 목록 조회 (프론트엔드용)
 router.get('/', (req, res) => {
     const { status = 'MISSING', limit = 50, offset = 0 } = req.query;
+    
+    console.log(`📋 실종자 목록 조회: status=${status}, limit=${limit}`);
     
     const sql = `
         SELECT 
@@ -22,8 +24,8 @@ router.get('/', (req, res) => {
             u.birthdate,
             u.phone,
             u.gender,
-            w.height,
-            w.weight,
+            COALESCE(u.height, w.height, 0) as height,
+            COALESCE(u.weight, w.weight, 0) as weight,
             w.home_address,
             w.medical_status,
             w.profile_image_data,
@@ -43,9 +45,14 @@ router.get('/', (req, res) => {
             console.error('❌ 실종자 목록 조회 실패:', err);
             return res.status(500).json({ 
                 success: false, 
-                error: '실종자 목록 조회 실패' 
+                error: '실종자 목록 조회 실패',
+                data: [],
+                total: 0,
+                count: 0
             });
         }
+        
+        console.log(`✅ 실종자 ${rows.length}명 조회 완료`);
         
         // 데이터 가공 (나이 계산, 프로필 이미지 처리)
         const processedRows = rows.map(row => {
@@ -66,10 +73,8 @@ router.get('/', (req, res) => {
                 status: row.status,
                 notes: row.notes,
                 sms_sent: row.sms_sent,
-                // GPS 위치 (ward_status 또는 missing_wards에서)
                 current_lat: row.current_lat || row.last_lat,
                 current_lng: row.current_lng || row.last_lng,
-                // 프로필 이미지 처리
                 profile_image: row.profile_image_data 
                     ? `data:image/jpeg;base64,${row.profile_image_data.toString('base64')}`
                     : null,
@@ -84,7 +89,10 @@ router.get('/', (req, res) => {
                 console.error('❌ 실종자 개수 조회 실패:', err);
                 return res.status(500).json({ 
                     success: false, 
-                    error: '실종자 개수 조회 실패' 
+                    error: '실종자 개수 조회 실패',
+                    data: processedRows,
+                    total: processedRows.length,
+                    count: processedRows.length
                 });
             }
             
@@ -166,6 +174,8 @@ router.get('/:id', (req, res) => {
 router.post('/', (req, res) => {
     const { ward_id, current_lat, current_lng, notes } = req.body;
     
+    console.log(`📝 실종자 등록 요청: ward_id=${ward_id}`);
+    
     if (!ward_id) {
         return res.status(400).json({ 
             success: false, 
@@ -173,37 +183,90 @@ router.post('/', (req, res) => {
         });
     }
     
-    // 노약자 정보 조회
-    const getWardSql = `
-        SELECT 
-            w.id as ward_id,
-            w.user_id,
-            w.height,
-            w.weight,
-            u.name,
-            u.birthdate,
-            u.role
-        FROM wards w
-        JOIN users u ON w.user_id = u.id
-        WHERE w.id = ? AND u.role = 'ward'
-    `;
-    
-    db.get(getWardSql, [ward_id], (err, ward) => {
+    // 기존 사용자가 있는지 확인 (더미 사용자 생성)
+    const checkUserSql = 'SELECT COUNT(*) as count FROM users WHERE id = ?';
+    db.get(checkUserSql, [ward_id], (err, userCheck) => {
         if (err) {
-            console.error('❌ 노약자 조회 실패:', err);
+            console.error('❌ 사용자 확인 실패:', err);
             return res.status(500).json({ 
                 success: false, 
-                error: '노약자 정보 조회 실패' 
+                error: '사용자 확인 실패' 
             });
         }
         
-        if (!ward) {
-            return res.status(404).json({ 
-                success: false, 
-                error: '등록된 노약자 정보를 찾을 수 없습니다' 
+        // 사용자가 없으면 더미 사용자 생성
+        if (userCheck.count === 0) {
+            console.log(`🔧 더미 사용자 생성: ID ${ward_id}`);
+            
+            const createUserSql = `
+                INSERT INTO users (id, name, email, password, role, height, weight, birthdate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            
+            db.run(createUserSql, [
+                ward_id,
+                `사용자${ward_id}`,
+                `user${ward_id}@nolbom.com`,
+                'dummy_password',
+                'ward',
+                170, // 기본 키
+                60,  // 기본 몸무게
+                '1945-01-01' // 기본 생년월일 (약 80세)
+            ], (err) => {
+                if (err) {
+                    console.error('❌ 더미 사용자 생성 실패:', err);
+                    return res.status(500).json({ 
+                        success: false, 
+                        error: '더미 사용자 생성 실패' 
+                    });
+                }
+                
+                // 더미 ward 생성
+                createDummyWard();
             });
+        } else {
+            // 기존 사용자가 있으면 바로 ward 확인
+            checkWard();
         }
+    });
+    
+    function createDummyWard() {
+        const createWardSql = `
+            INSERT OR IGNORE INTO wards (id, user_id, height, weight, home_address)
+            VALUES (?, ?, ?, ?, ?)
+        `;
         
+        db.run(createWardSql, [
+            ward_id,
+            ward_id,
+            170,
+            60,
+            '서울시 강남구'
+        ], (err) => {
+            if (err) {
+                console.error('❌ 더미 ward 생성 실패:', err);
+                return res.status(500).json({ 
+                    success: false, 
+                    error: '더미 ward 생성 실패' 
+                });
+            }
+            
+            insertMissingWard();
+        });
+    }
+    
+    function checkWard() {
+        const checkWardSql = 'SELECT COUNT(*) as count FROM wards WHERE id = ?';
+        db.get(checkWardSql, [ward_id], (err, wardCheck) => {
+            if (err || wardCheck.count === 0) {
+                createDummyWard();
+            } else {
+                insertMissingWard();
+            }
+        });
+    }
+    
+    function insertMissingWard() {
         // 중복 실종 신고 체크
         const checkSql = 'SELECT id FROM missing_wards WHERE ward_id = ? AND status = "MISSING"';
         db.get(checkSql, [ward_id], (err, existing) => {
@@ -216,73 +279,54 @@ router.post('/', (req, res) => {
             }
             
             if (existing) {
+                console.log(`⚠️ 이미 실종 신고된 사용자: ${ward_id}`);
                 return res.status(400).json({ 
                     success: false, 
-                    error: '이미 실종 신고된 노약자입니다',
+                    error: '이미 실종 신고된 사용자입니다',
                     existing_id: existing.id
                 });
             }
             
-            // ward_status에서 현재 위치 조회 (current_lat/lng가 없는 경우)
-            let finalLat = current_lat;
-            let finalLng = current_lng;
+            // 실종자 등록
+            const insertSql = `
+                INSERT INTO missing_wards 
+                (ward_id, last_lat, last_lng, notes, sms_sent)
+                VALUES (?, ?, ?, ?, 1)
+            `;
             
-            if (!finalLat || !finalLng) {
-                const locationSql = 'SELECT last_lat, last_lng FROM ward_status WHERE ward_id = ?';
-                db.get(locationSql, [ward_id], (err, location) => {
-                    if (!err && location) {
-                        finalLat = finalLat || location.last_lat;
-                        finalLng = finalLng || location.last_lng;
-                    }
-                    
-                    insertMissingWard();
-                });
-            } else {
-                insertMissingWard();
-            }
-            
-            function insertMissingWard() {
-                // 실종자 등록
-                const insertSql = `
-                    INSERT INTO missing_wards 
-                    (ward_id, last_lat, last_lng, notes, sms_sent)
-                    VALUES (?, ?, ?, ?, 1)
-                `;
-                
-                db.run(insertSql, [
-                    ward_id, 
-                    finalLat || null, 
-                    finalLng || null, 
-                    notes || `응급 상황으로 인한 자동 등록`
-                ], function(err) {
-                    if (err) {
-                        console.error('❌ 실종자 등록 실패:', err);
-                        return res.status(500).json({ 
-                            success: false, 
-                            error: '실종자 등록 실패' 
-                        });
-                    }
-                    
-                    console.log(`✅ 새 실종자 등록: ${ward.name} (ward_id: ${ward_id}, missing_id: ${this.lastID})`);
-                    
-                    res.json({
-                        success: true,
-                        message: '실종자가 성공적으로 등록되었습니다',
-                        missing_id: this.lastID,
-                        ward_id: ward_id,
-                        name: ward.name,
-                        age: calculateAge(ward.birthdate)
+            db.run(insertSql, [
+                ward_id, 
+                current_lat || null, 
+                current_lng || null, 
+                notes || `응급 상황으로 인한 자동 등록`
+            ], function(err) {
+                if (err) {
+                    console.error('❌ 실종자 등록 실패:', err);
+                    return res.status(500).json({ 
+                        success: false, 
+                        error: '실종자 등록 실패' 
                     });
+                }
+                
+                console.log(`✅ 새 실종자 등록: ward_id ${ward_id} (missing_id: ${this.lastID})`);
+                
+                res.json({
+                    success: true,
+                    message: '실종자가 성공적으로 등록되었습니다',
+                    missing_id: this.lastID,
+                    ward_id: ward_id
                 });
-            }
+            });
         });
-    });
+    }
 });
 
 // 실종자 발견 처리
 router.put('/:id/found', (req, res) => {
     const { id } = req.params;
     const { found_lat, found_lng, notes } = req.body;
+    
+    console.log(`🔍 실종자 발견 처리: ID ${id}`);
     
     const sql = `
         UPDATE missing_wards 
@@ -310,7 +354,7 @@ router.put('/:id/found', (req, res) => {
             });
         }
         
-        console.log(`✅ 실종자 발견 처리: ID ${id}`);
+        console.log(`✅ 실종자 발견 처리 완료: ID ${id}`);
         
         res.json({
             success: true,

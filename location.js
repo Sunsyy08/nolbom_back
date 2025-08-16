@@ -1,4 +1,4 @@
-// location.js
+// location.js - 수정된 버전
 const express = require('express');
 const db = require('./db');
 
@@ -25,16 +25,18 @@ module.exports = function(app, io) {
       updatedAt: new Date().toISOString()
     };
 
-    // 노약자 등록 여부 확인
+    // 노약자 등록 여부 확인 + ward_id 조회
     db.get(
-      `SELECT * FROM users WHERE id = ? AND role = 'ward'`,
+      `SELECT u.*, w.id as ward_id FROM users u
+       LEFT JOIN wards w ON u.id = w.user_id  
+       WHERE u.id = ? AND u.role = 'ward'`,
       [user_id],
       (err, user) => {
         if (err) {
           return res.status(500).json({ error: 'DB 오류', detail: err.message });
         }
 
-        if (!user) {
+        if (!user || !user.ward_id) {
           return res.status(403).json({ error: '등록되지 않은 노약자입니다.' });
         }
 
@@ -50,11 +52,11 @@ module.exports = function(app, io) {
 
         userLocations.set(user_id, locationData);
 
-        // DB에 저장
+        // DB에 저장 - ward_id 사용
         db.run(
-          `INSERT INTO locations (user_id, lat, lng, timestamp)
+          `INSERT INTO locations (ward_id, lat, lng, timestamp)
            VALUES (?, ?, ?, ?)`,
-          [user_id, data.lat, data.lng, data.updatedAt],
+          [user.ward_id, data.lat, data.lng, data.updatedAt],
           (err) => {
             if (err) console.error('위치 저장 실패:', err.message);
           }
@@ -176,39 +178,51 @@ module.exports = function(app, io) {
           return;
         }
 
-        // 위치 데이터 업데이트
-        const locationData = {
-          user_id: userId,
-          userName: userName || `사용자${userId}`,
-          lat: parseFloat(latitude),
-          lng: parseFloat(longitude),
-          updatedAt: new Date().toISOString(),
-          isOnline: true
-        };
+        // ward_id 조회 후 위치 저장
+        db.get(
+          `SELECT w.id as ward_id FROM wards w WHERE w.user_id = ?`,
+          [userId],
+          (err, ward) => {
+            if (err || !ward) {
+              console.error('Ward 조회 실패:', err?.message || 'Ward not found');
+              return;
+            }
 
-        userLocations.set(userId, locationData);
+            // 위치 데이터 업데이트
+            const locationData = {
+              user_id: userId,
+              userName: userName || `사용자${userId}`,
+              lat: parseFloat(latitude),
+              lng: parseFloat(longitude),
+              updatedAt: new Date().toISOString(),
+              isOnline: true
+            };
 
-        // DB에 저장
-        db.run(
-          `INSERT INTO locations (user_id, lat, lng, timestamp)
-           VALUES (?, ?, ?, ?)`,
-          [userId, locationData.lat, locationData.lng, locationData.updatedAt],
-          (err) => {
-            if (err) console.error('위치 저장 실패:', err.message);
+            userLocations.set(userId, locationData);
+
+            // DB에 저장 - ward_id 사용
+            db.run(
+              `INSERT INTO locations (ward_id, lat, lng, timestamp)
+               VALUES (?, ?, ?, ?)`,
+              [ward.ward_id, locationData.lat, locationData.lng, locationData.updatedAt],
+              (err) => {
+                if (err) console.error('위치 저장 실패:', err.message);
+              }
+            );
+
+            // 다른 모든 클라이언트에게 위치 업데이트 브로드캐스트
+            socket.broadcast.emit('location_update', {
+              type: 'location',
+              userId,
+              userName: locationData.userName,
+              latitude: locationData.lat,
+              longitude: locationData.lng,
+              timestamp: new Date().getTime()
+            });
+
+            console.log(`📍 위치 업데이트: ${userName} (${latitude}, ${longitude})`);
           }
         );
-
-        // 다른 모든 클라이언트에게 위치 업데이트 브로드캐스트
-        socket.broadcast.emit('location_update', {
-          type: 'location',
-          userId,
-          userName: locationData.userName,
-          latitude: locationData.lat,
-          longitude: locationData.lng,
-          timestamp: new Date().getTime()
-        });
-
-        console.log(`📍 위치 업데이트: ${userName} (${latitude}, ${longitude})`);
 
       } catch (error) {
         console.error('위치 업데이트 오류:', error);

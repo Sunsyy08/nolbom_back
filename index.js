@@ -39,6 +39,9 @@ app.use(cors({
   credentials: true
 }));
 
+app.use(express.json({ limit: '10mb' })); // JSON 파싱 (이미지 데이터 고려)
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
 const JWT_SECRET = 'my_secret_key';
 const PORT = process.env.PORT || 3000;
 
@@ -692,8 +695,7 @@ app.get('/user/full-profile', authenticateToken, (req, res) => {
   });
 });
 
-// 응급 신고 라우터 연결
-app.use('/api/emergency', emergencyRoutes);
+
 
 // 요청 로깅 미들웨어
 app.use((req, res, next) => {
@@ -701,8 +703,126 @@ app.use((req, res, next) => {
   next();
 });
 // API 라우트 연결
-app.use('/api/missing-persons', missingRoutes);
+// 응급 신고 라우터 연결
+app.use('/api/emergency', emergencyRoutes);
+app.use('/api/missing', missingRoutes);
 app.use('/api/reports', reportsRoutes);
+
+// 헬스체크 엔드포인트
+app.get('/api/health', (req, res) => {
+  res.json({
+      success: true,
+      message: '놀봄 Node.js API 서버 정상 동작',
+      timestamp: new Date().toISOString(),
+      version: '1.0.0',
+      features: [
+          '실종자 목록 관리',
+          '신고 이력 저장',
+          'Python FastAPI 연동',
+          'Android Kotlin Compose 지원'
+      ]
+  });
+});
+
+// 🔧 루트 엔드포인트도 올바른 경로로 수정
+app.get('/', (req, res) => {
+  res.json({
+      message: '🚀 놀봄 API 서버에 오신 것을 환영합니다!',
+      version: '1.0.0',
+      endpoints: {
+          health: '/api/health',
+          missing: '/api/missing',          // 수정됨
+          reports: '/api/reports',
+          emergency: '/api/emergency'       // 추가됨
+      },
+      docs: '각 엔드포인트에 GET 요청을 보내 API 문서를 확인하세요'
+  });
+});
+
+// 대시보드 통계 API - 🔧 수정된 버전
+app.get('/api/dashboard', async (req, res) => {
+  try {
+      // 🔧 올바른 테이블명으로 수정
+      const queries = [
+          'SELECT COUNT(*) as count FROM missing_wards WHERE status = "MISSING"',
+          'SELECT COUNT(*) as count FROM missing_wards WHERE status = "FOUND"', 
+          'SELECT COUNT(*) as count FROM emergency_reports WHERE DATE(report_time) = DATE("now")',
+          'SELECT COUNT(*) as count FROM emergency_reports WHERE detected_keyword IS NOT NULL'
+      ];
+      
+      const results = await Promise.all(
+          queries.map(query => new Promise((resolve, reject) => {
+              db.get(query, [], (err, row) => {
+                  if (err) reject(err);
+                  else resolve(row.count || 0);
+              });
+          }))
+      );
+      
+      // 🔧 올바른 테이블명으로 수정된 최근 활동 조회
+      const recentActivityQuery = `
+          SELECT 
+              'missing' as type,
+              u.name as title,
+              mw.detected_at as created_at,
+              '실종 신고' as description
+          FROM missing_wards mw
+          JOIN wards w ON mw.ward_id = w.id
+          JOIN users u ON w.user_id = u.id
+          WHERE DATE(mw.detected_at) >= DATE('now', '-7 days')
+          UNION ALL
+          SELECT 
+              'report' as type,
+              SUBSTR(er.transcript, 1, 50) || '...' as title,
+              er.report_time as created_at,
+              CASE 
+                  WHEN er.detected_keyword IS NOT NULL THEN '응급 신고'
+                  ELSE '일반 신고'
+              END as description
+          FROM emergency_reports er
+          WHERE DATE(er.report_time) >= DATE('now', '-7 days')
+          ORDER BY created_at DESC
+          LIMIT 10
+      `;
+      
+      const recentActivity = await new Promise((resolve, reject) => {
+          db.all(recentActivityQuery, [], (err, rows) => {
+              if (err) reject(err);
+              else resolve(rows || []);
+          });
+      });
+      
+      res.json({
+          success: true,
+          stats: {
+              missing_count: results[0],
+              found_count: results[1], 
+              today_reports: results[2],
+              keyword_reports: results[3]
+          },
+          recent_activity: recentActivity
+      });
+      
+  } catch (error) {
+      console.error('❌ 대시보드 통계 조회 실패:', error);
+      res.status(500).json({
+          success: false,
+          error: '대시보드 통계 조회 실패',
+          detail: error.message
+      });
+  }
+});
+
+
+// 에러 핸들링 미들웨어
+app.use((err, req, res, next) => {
+  console.error('❌ 서버 에러:', err);
+  res.status(500).json({
+      success: false,
+      error: '서버 내부 오류가 발생했습니다',
+      timestamp: new Date().toISOString()
+  });
+});
 
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 server.listen(PORT, '0.0.0.0', () => {
