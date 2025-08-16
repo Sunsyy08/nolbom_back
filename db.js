@@ -69,27 +69,35 @@ db.run(`
 // db.run(`ALTER TABLE ward_status ADD COLUMN last_lng REAL`);
 // db.run(`ALTER TABLE ward_status ADD COLUMN last_moved_at INTEGER`);
 
+// 실종자 목록 테이블 (기존 missing_wards 활용)
 db.run(`
 CREATE TABLE IF NOT EXISTS missing_wards (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ward_id INTEGER,
-  detected_at DATETIME,
+  detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   last_lat REAL,
   last_lng REAL,
-  status TEXT DEFAULT 'active',  -- active, found
+  status TEXT DEFAULT 'MISSING',  -- MISSING, FOUND
   notes TEXT,
-  updated_at DATETIME,
+  sms_sent INTEGER DEFAULT 1,     -- SMS 전송 여부
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (ward_id) REFERENCES wards(id) ON DELETE CASCADE
 )
 `);
+// 신고 이력 테이블 (기존 emergency_reports 활용 + 확장)
 db.run(`
     CREATE TABLE IF NOT EXISTS emergency_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_name VARCHAR(100) NOT NULL,              -- 사용자 이름
       detected_keyword VARCHAR(100) NOT NULL,       -- 감지된 키워드
       ward_id INTEGER,                              -- 노약자 ID (wards 테이블 참조)
+      transcript TEXT,                              -- 음성 인식 전체 텍스트
+      confidence REAL,                              -- 음성 인식 신뢰도
+      missing_ward_id INTEGER,                      -- 생성된 실종자 ID
+      sms_sent INTEGER DEFAULT 0,                   -- SMS 전송 여부
       report_time DATETIME DEFAULT CURRENT_TIMESTAMP, -- 신고 시간
-      FOREIGN KEY(ward_id) REFERENCES wards(id)
+      FOREIGN KEY(ward_id) REFERENCES wards(id),
+      FOREIGN KEY(missing_ward_id) REFERENCES missing_wards(id)
     )
   `);
 });

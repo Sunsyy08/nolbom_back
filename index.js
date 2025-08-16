@@ -3,6 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -21,6 +22,8 @@ const wardLocationRouter = require('./routes/wardLocation');
 const missingWardsRouter = require('./routes/missingWard');
 const auth = require('./middlewares/auth');
 const emergencyRoutes = require('./routes/emergency');
+const missingRoutes = require('./routes/missing');
+const reportsRoutes = require('./routes/reports');
 
 
 const app = express();
@@ -30,7 +33,11 @@ app.use(express.json());           // ← JSON 바디 파싱
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-
+// 미들웨어 설정
+app.use(cors({
+  origin: ['http://localhost:3000', 'http://localhost:8000'], // Python FastAPI와 프론트엔드 허용
+  credentials: true
+}));
 
 const JWT_SECRET = 'my_secret_key';
 const PORT = process.env.PORT || 3000;
@@ -687,6 +694,15 @@ app.get('/user/full-profile', authenticateToken, (req, res) => {
 
 // 응급 신고 라우터 연결
 app.use('/api/emergency', emergencyRoutes);
+
+// 요청 로깅 미들웨어
+app.use((req, res, next) => {
+  console.log(`📡 ${new Date().toLocaleString()} - ${req.method} ${req.path}`);
+  next();
+});
+// API 라우트 연결
+app.use('/api/missing-persons', missingRoutes);
+app.use('/api/reports', reportsRoutes);
 
 // 서버 시작 후 기존 외출 중인 사용자들의 타이머를 설정
 server.listen(PORT, '0.0.0.0', () => {
