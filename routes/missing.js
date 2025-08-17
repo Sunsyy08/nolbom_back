@@ -3,6 +3,20 @@ const express = require('express');
 const db = require('../db');
 const router = express.Router();
 
+// 나이 계산 함수 추가
+function calculateAge(birthdate) {
+    if (!birthdate) return null;
+    const birth = new Date(birthdate);
+    const today = new Date();
+    let age = today.getFullYear() - birth.getFullYear();
+    const m = today.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+      age--;
+    }
+    return age;
+  }
+  
+
 // 실종자 목록 조회 (프론트엔드용)
 router.get('/', (req, res) => {
     const { status = 'MISSING', limit = 50, offset = 0 } = req.query;
@@ -24,8 +38,8 @@ router.get('/', (req, res) => {
             u.birthdate,
             u.phone,
             u.gender,
-            COALESCE(u.height, w.height, 0) as height,
-            COALESCE(u.weight, w.weight, 0) as weight,
+            w.height AS height,
+            w.weight AS weight,
             w.home_address,
             w.medical_status,
             w.profile_image_data,

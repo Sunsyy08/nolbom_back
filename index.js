@@ -79,7 +79,7 @@ app.post('/signup', async (req, res) => {
       const token = jwt.sign(
         { user_id: this.lastID, role: 'user' }, 
         JWT_SECRET, 
-        { expiresIn: '30d' }
+        { expiresIn: '365d' }
       );
       
       // 생성된 user_id와 토큰을 함께 반환
