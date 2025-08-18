@@ -69,32 +69,49 @@ router.get('/', (req, res) => {
         console.log(`✅ 실종자 ${rows.length}명 조회 완료`);
         
         // 데이터 가공 (나이 계산, 프로필 이미지 처리)
-        const processedRows = rows.map(row => {
-            const age = calculateAge(row.birthdate);
-            
-            return {
-                id: row.missing_id,
-                ward_id: row.ward_id,
-                name: row.name,
-                age: age,
-                height: row.height || 0,
-                weight: row.weight || 0,
-                gender: row.gender,
-                phone: row.phone,
-                home_address: row.home_address,
-                medical_status: row.medical_status,
-                detected_at: row.detected_at,
-                status: row.status,
-                notes: row.notes,
-                sms_sent: row.sms_sent,
-                current_lat: row.current_lat || row.last_lat,
-                current_lng: row.current_lng || row.last_lng,
-                profile_image: row.profile_image_data 
-                    ? `data:image/jpeg;base64,${row.profile_image_data.toString('base64')}`
-                    : null,
-                updated_at: row.updated_at
-            };
-        });
+        // 데이터 가공 (나이 계산, 프로필 이미지 처리)
+const processedRows = rows.map(row => {
+    const age = calculateAge(row.birthdate);
+    
+    // 🔍 프로필 이미지 디버깅 로그 추가
+    const hasProfileImage = row.profile_image_data ? true : false;
+    const imageSize = row.profile_image_data ? row.profile_image_data.length : 0;
+    console.log(`🖼️ ${row.name}: 프로필 이미지 ${hasProfileImage ? `있음 (${imageSize} bytes)` : '없음'}`);
+    
+    // 프로필 이미지 base64 변환
+    let profileImageBase64 = null;
+    if (row.profile_image_data) {
+        try {
+            profileImageBase64 = `data:image/jpeg;base64,${row.profile_image_data.toString('base64')}`;
+            console.log(`✅ ${row.name}: base64 변환 성공 (길이: ${profileImageBase64.length})`);
+        } catch (error) {
+            console.error(`❌ ${row.name}: base64 변환 실패:`, error.message);
+            profileImageBase64 = null;
+        }
+    }
+    
+    return {
+        id: row.missing_id,
+        ward_id: row.ward_id,
+        name: row.name,
+        age: age,
+        height: row.height || 0,
+        weight: row.weight || 0,
+        gender: row.gender,
+        phone: row.phone,
+        home_address: row.home_address,
+        medical_status: row.medical_status,
+        detected_at: row.detected_at,
+        status: row.status,
+        notes: row.notes,
+        sms_sent: row.sms_sent,
+        current_lat: row.current_lat || row.last_lat,
+        current_lng: row.current_lng || row.last_lng,
+        profile_image: profileImageBase64,  // 수정된 부분
+        updated_at: row.updated_at
+    };
+});
+
         
         // 총 개수 조회
         const countSql = 'SELECT COUNT(*) as total FROM missing_wards WHERE status = ?';
