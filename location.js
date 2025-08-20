@@ -169,46 +169,47 @@ module.exports = function(app, io) {
     });
 
     // 위치 업데이트 처리
-    socket.on('location', (data) => {
-      try {
-        const { userId, userName, latitude, longitude } = data;
-        
-        if (!userId || latitude === undefined || longitude === undefined) {
-          socket.emit('error', { message: '필수 데이터가 누락되었습니다' });
+    // 📍 79번째 줄 근처 - ward_id 조회 후 위치 저장 부분
+socket.on('location', (data) => {
+  try {
+    const { userId, userName, latitude, longitude } = data;
+    
+    if (!userId || latitude === undefined || longitude === undefined) {
+      socket.emit('error', { message: '필수 데이터가 누락되었습니다' });
+      return;
+    }
+
+    // ward_id 조회 후 위치 저장
+    db.get(
+      `SELECT w.id as ward_id FROM wards w WHERE w.user_id = ?`,
+      [userId],
+      (err, ward) => {
+        if (err || !ward) {
+          console.error('Ward 조회 실패:', err?.message || 'Ward not found');
           return;
         }
 
-        // ward_id 조회 후 위치 저장
-        db.get(
-          `SELECT w.id as ward_id FROM wards w WHERE w.user_id = ?`,
-          [userId],
-          (err, ward) => {
-            if (err || !ward) {
-              console.error('Ward 조회 실패:', err?.message || 'Ward not found');
-              return;
-            }
+        // 위치 데이터 업데이트
+        const locationData = {
+          user_id: userId,
+          userName: userName || `사용자${userId}`,
+          lat: parseFloat(latitude),
+          lng: parseFloat(longitude),
+          updatedAt: new Date().toISOString(),
+          isOnline: true
+        };
 
-            // 위치 데이터 업데이트
-            const locationData = {
-              user_id: userId,
-              userName: userName || `사용자${userId}`,
-              lat: parseFloat(latitude),
-              lng: parseFloat(longitude),
-              updatedAt: new Date().toISOString(),
-              isOnline: true
-            };
+        userLocations.set(userId, locationData);
 
-            userLocations.set(userId, locationData);
-
-            // DB에 저장 - ward_id 사용
-            db.run(
-              `INSERT INTO locations (ward_id, lat, lng, timestamp)
-               VALUES (?, ?, ?, ?)`,
-              [ward.ward_id, locationData.lat, locationData.lng, locationData.updatedAt],
-              (err) => {
-                if (err) console.error('위치 저장 실패:', err.message);
-              }
-            );
+        // 🔧 수정: ward.ward_id → ward.id
+        db.run(
+          `INSERT INTO locations (ward_id, lat, lng, timestamp)
+           VALUES (?, ?, ?, ?)`,
+          [ward.id, locationData.lat, locationData.lng, locationData.updatedAt], // ← 여기 수정
+          (err) => {
+            if (err) console.error('위치 저장 실패:', err.message);
+          }
+        );
 
             // 다른 모든 클라이언트에게 위치 업데이트 브로드캐스트
             socket.broadcast.emit('location_update', {
